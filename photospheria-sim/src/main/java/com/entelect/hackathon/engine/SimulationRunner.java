@@ -8,6 +8,8 @@ import com.entelect.hackathon.models.submission.Submission;
 import com.entelect.hackathon.models.submission.TickAction;
 import com.entelect.hackathon.models.submission.PlantingCommand;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -35,6 +37,9 @@ public class SimulationRunner {
             processPlantSpread();
             evaluateAnimalSpawns();
         }
+    }
+
+    public record SpreadAction(Cell target, Plant species) {
     }
 
     private void processNutrientCycle() {
@@ -101,8 +106,67 @@ public class SimulationRunner {
     }
 
     private void processPlantSpread() {
-        // TODO: Handle spread rates, geometrical propagation, and invasiveness
-        // conflicts[cite: 2, 4]
+        List<SpreadAction> pendingSpreads = new ArrayList<>();
+
+        // Pass 1: Identify all mature plants ready to spread
+        for (int x = 0; x < grid.getWidth(); x++) {
+            for (int y = 0; y < grid.getHeight(); y++) {
+                Cell cell = grid.getCell(x, y);
+
+                if (cell.isOccupied() && cell.getCurrentPlant().isMature()) {
+                    PlantInstance plant = cell.getCurrentPlant();
+                    int spreadRate = plant.getSpecies().getGrowth().getSpreadRate();
+
+                    // Trigger spread if enough ticks have passed[cite: 2]
+                    if (plant.getTicksSinceLastSpread() >= spreadRate) {
+                        String type = plant.getSpecies().getGrowth().getSpreadType();
+                        int range = plant.getSpecies().getGrowth().getSpreadRange();
+
+                        List<Cell> targets = PropagationService.getTargetCells(grid, cell, type, range);
+                        for (Cell target : targets) {
+                            pendingSpreads.add(new SpreadAction(target, plant.getSpecies()));
+                        }
+
+                        plant.resetSpreadCounter();
+                    }
+                }
+            }
+        }
+
+        // Pass 2: Apply the spreads and resolve conflicts
+        for (SpreadAction action : pendingSpreads) {
+            Cell target = action.target();
+            Plant newSpecies = action.species();
+
+            // Ignore if soil type is incompatible[cite: 2, 4]
+            if (!newSpecies.getPreferredSoil().contains(target.getSoilType())) {
+                continue;
+            }
+
+            if (target.isOccupied()) {
+                PlantInstance existingPlant = target.getCurrentPlant();
+
+                if (!existingPlant.isMature()) {
+                    // Immature plants cannot use invasiveness rank, the newest plant simply
+                    // overwrites[cite: 4]
+                    target.setCurrentPlant(new PlantInstance(newSpecies));
+                    target.setDeadMatter(false);
+                } else {
+                    // Mature plants fight based on invasiveness rank[cite: 4]
+                    int existingRank = existingPlant.getSpecies().getGrowth().getInvasivenessRank();
+                    int newRank = newSpecies.getGrowth().getInvasivenessRank();
+
+                    if (newRank > existingRank) {
+                        target.setCurrentPlant(new PlantInstance(newSpecies));
+                        target.setDeadMatter(false);
+                    }
+                }
+            } else {
+                // Empty soil, just plant it
+                target.setCurrentPlant(new PlantInstance(newSpecies));
+                target.setDeadMatter(false);
+            }
+        }
     }
 
     private void evaluateAnimalSpawns() {
