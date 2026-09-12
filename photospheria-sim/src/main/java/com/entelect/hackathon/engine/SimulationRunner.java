@@ -2,30 +2,36 @@ package com.entelect.hackathon.engine;
 
 import com.entelect.hackathon.models.state.Grid;
 import com.entelect.hackathon.models.state.Cell;
+import com.entelect.hackathon.models.state.PlantInstance;
+import com.entelect.hackathon.models.staticdata.Plant;
+import com.entelect.hackathon.models.submission.Submission;
+import com.entelect.hackathon.models.submission.TickAction;
+import com.entelect.hackathon.models.submission.PlantingCommand;
+
+import java.util.Map;
+import java.util.Optional;
 
 public class SimulationRunner {
     private final Grid grid;
     private final int maxTicks;
+    private final Submission schedule;
+    private final Map<Integer, Plant> plantCatalogue;
     private int currentTick;
 
-    public SimulationRunner(Grid grid, int maxTicks) {
+    // Updated constructor to accept the schedule and the catalogue
+    public SimulationRunner(Grid grid, int maxTicks, Submission schedule, Map<Integer, Plant> plantCatalogue) {
         this.grid = grid;
         this.maxTicks = maxTicks;
+        this.schedule = schedule;
+        this.plantCatalogue = plantCatalogue;
         this.currentTick = 0;
     }
 
     public void runSimulation() {
         for (currentTick = 0; currentTick < maxTicks; currentTick++) {
-            // 1. Process new plant placements from your JSON schedule (Stub)
             processScheduledPlantings(currentTick);
-
-            // 2. Process biological aging for maturity checks
             agePlants();
-
-            // 3. Process the soil ecosystem and death mechanics
             processNutrientCycle();
-
-            // 4. Spread and Animals (Stubs for the next phases)
             processPlantSpread();
             evaluateAnimalSpawns();
         }
@@ -65,8 +71,33 @@ public class SimulationRunner {
     }
 
     private void processScheduledPlantings(int tick) {
-        // TODO: Read from a generated schedule and place up to 20 plants per tick[cite:
-        // 4]
+        // Find if we have scheduled actions for the current tick
+        Optional<TickAction> actionForTick = schedule.getActions().stream()
+                .filter(action -> action.getTick() == tick)
+                .findFirst();
+
+        if (actionForTick.isPresent()) {
+            // Only process a maximum of 20 plants per tick per the rules[cite: 4]
+            actionForTick.get().getPlants().stream()
+                    .limit(20)
+                    .forEach(command -> {
+                        int x = command.getCol(); // X maps to columns
+                        int y = command.getRow(); // Y maps to rows
+                        int plantIndex = command.getIndex();
+
+                        // Validate coordinates and ensure soil type matches preferred soil[cite: 2, 4]
+                        if (grid.isWithinBounds(x, y)) {
+                            Cell cell = grid.getCell(x, y);
+                            Plant species = plantCatalogue.get(plantIndex);
+
+                            // TODO: Later add the UnlockEvaluator check here
+                            if (species != null && species.getPreferredSoil().contains(cell.getSoilType())) {
+                                cell.setCurrentPlant(new PlantInstance(species));
+                                cell.setDeadMatter(false); // Placing a new plant clears dead matter flag
+                            }
+                        }
+                    });
+        }
     }
 
     private void processPlantSpread() {
