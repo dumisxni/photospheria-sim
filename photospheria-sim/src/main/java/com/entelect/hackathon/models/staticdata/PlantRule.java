@@ -6,7 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class PlantRule {
     private String type;
-    private Integer value; // Use Integer wrapper class so it can be null if not present
+    private Integer value; // Used Integer wrapper class so it can be null if not present
     private String feature;
     private JsonNode species; // Can hold a string or an array of strings
 
