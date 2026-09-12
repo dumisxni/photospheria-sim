@@ -3,12 +3,14 @@ package com.entelect.hackathon.engine;
 import com.entelect.hackathon.models.state.Grid;
 import com.entelect.hackathon.models.state.Cell;
 import com.entelect.hackathon.models.state.PlantInstance;
+import com.entelect.hackathon.models.staticdata.Animal;
 import com.entelect.hackathon.models.staticdata.Plant;
 import com.entelect.hackathon.models.submission.Submission;
 import com.entelect.hackathon.models.submission.TickAction;
 import com.entelect.hackathon.models.submission.PlantingCommand;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -19,6 +21,9 @@ public class SimulationRunner {
     private final Submission schedule;
     private final Map<Integer, Plant> plantCatalogue;
     private int currentTick;
+    private final List<Animal> animalCatalogue;
+    private final Map<String, List<String>> classifications;
+    private List<Animal> activeAnimals = new ArrayList<>();
 
     // Updated constructor to accept the schedule and the catalogue
     public SimulationRunner(Grid grid, int maxTicks, Submission schedule, Map<Integer, Plant> plantCatalogue) {
@@ -27,6 +32,8 @@ public class SimulationRunner {
         this.schedule = schedule;
         this.plantCatalogue = plantCatalogue;
         this.currentTick = 0;
+        this.animalCatalogue = new ArrayList<>();
+        this.classifications = new HashMap<>();
     }
 
     public void runSimulation() {
@@ -37,6 +44,9 @@ public class SimulationRunner {
             processPlantSpread();
             evaluateAnimalSpawns();
         }
+        ScoreCalculator calculator = new ScoreCalculator(plantCatalogue.size(), maxTicks);
+        double finalScore = calculator.calculateFinalScore(grid);
+        System.out.println("Simulation Complete. Final Score: " + finalScore);
     }
 
     public record SpreadAction(Cell target, Plant species) {
@@ -115,8 +125,8 @@ public class SimulationRunner {
 
                 if (cell.isOccupied() && cell.getCurrentPlant().isMature()) {
                     PlantInstance plant = cell.getCurrentPlant();
-                    int spreadRate = plant.getSpecies().getGrowth().getSpreadRate();
-
+                    // int spreadRate = plant.getSpecies().getGrowth().getSpreadRate();
+                    int spreadRate = (int) Math.ceil(getModifiedSpreadRate(plant.getSpecies())); // Adjusted spread rate
                     // Trigger spread if enough ticks have passed[cite: 2]
                     if (plant.getTicksSinceLastSpread() >= spreadRate) {
                         String type = plant.getSpecies().getGrowth().getSpreadType();
@@ -170,6 +180,36 @@ public class SimulationRunner {
     }
 
     private void evaluateAnimalSpawns() {
-        // TODO: Check coverage thresholds for animals and apply buffs[cite: 5]
+        activeAnimals.clear();
+        GridAnalytics analytics = new GridAnalytics(grid, classifications);
+
+        for (Animal animal : animalCatalogue) {
+            if (AnimalEvaluator.isAnimalActive(animal, analytics)) {
+                activeAnimals.add(animal);
+            }
+        }
+    }
+
+    // Helper method to calculate modified spread rates[cite: 5]
+    private double getModifiedSpreadRate(Plant species) {
+        double baseRate = species.getGrowth().getSpreadRate();
+        double multiplier = 1.0;
+
+        for (Animal animal : activeAnimals) {
+            for (var effect : animal.getEffects()) {
+                if ("spread_rate".equals(effect.getType()) && "multiply".equals(effect.getMode())) {
+                    // Check if the effect targets this specific plant OR a group it belongs
+                    // to[cite: 1, 5]
+                    boolean appliesToSpecies = species.getPlant().equals(effect.getTarget());
+                    boolean appliesToGroup = classifications.getOrDefault(effect.getTarget(), List.of())
+                            .contains(species.getPlant());
+
+                    if (appliesToSpecies || appliesToGroup) {
+                        multiplier *= effect.getValue();
+                    }
+                }
+            }
+        }
+        return baseRate / multiplier; // Higher multiplier = faster spread = lower tick requirement
     }
 }
